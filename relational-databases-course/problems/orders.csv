@@ -1,0 +1,7 @@
+id_order, order_code, src_address , dst_address , total_cost
+1,ORD_1,addr:ping:112233,addr:ping:332211,1.2
+2,ORD_2,addr:ping:112233,addr:ping:332211,2.7  
+3,ORD_3,addr:ping:112233,addr:ping:332211,3.9
+4,ORD_4,addr:ping:112233,addr:ping:332211,4.3
+5,ORD_5,addr:ping:112233,addr:ping:332211,5.121
+6,ORD_6,addr:ping:112233,addr:ping:332211,6.1231
