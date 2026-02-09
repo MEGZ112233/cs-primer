@@ -11,13 +11,15 @@ class Encoder :
     def encode_int32(number):
         number = int(number) 
         encoded_value = number.to_bytes(4)
-        return encoded_value
+        return encoded_value 
 
 
     def encode_text(text) :
         text = str(text)
-        encoded_value = text.encode('utf-8')
-        return encoded_value
+        if len(text) > 1024 : 
+           raise Exception('text length exceeded 1024 character')
+        encoded_value = len(text).to_bytes(2) +  text.encode('utf-8')
+        return encoded_value 
     
     @classmethod
     def encode_value(cls , value , data_type):
@@ -28,60 +30,41 @@ class Encoder :
             method_name = f'encode_{data_type}'
             method = getattr(cls , method_name)
             encoded_value = method(value)
-            print(encoded_value)
-            return encoded_value
+            return encoded_value 
         except AttributeError  as e  :  
             raise Exception(f'this {data_type} is not supported to be encoded')
-class Decoder : 
-        def decode_int32(number): 
-            encoded_value = int.from_bytes(number, 'big')
-            return encoded_value
 
-
-        def decode_text(text) :
-            text = str(text)
-            encoded_value = text.encode('utf-8')
-            return encoded_value
-        
-        @classmethod
-        def decode_value(cls , value , data_type):
-            """
-            this we will pass to it a value and  then we will encode based on the datatype 
-            """
-            try  : 
-                method_name = f'encode_{data_type}'
-                method = getattr(cls , method_name)
-                encoded_value = method(value)
-                print(encoded_value)
-                return encoded_value
-            except AttributeError  as e  :  
-                raise Exception(f'this {data_type} is not supported to be encoded')
-            
-def decode_value(bin_file , column_type : Callable) : 
-    """
-    this we will pass to it a binary encoded value and it will decode it to original value .
-    """
-    try : 
-        number_of_bytes = int.from_bytes(bin_file.read(4),'big')
-        print(f'the number of bytes is {number_of_bytes}')
-        column_value = column_type(bin_file.read(number_of_bytes).decode('utf-8'))
-        print(f'column_info ({number_of_bytes} , {column_value})')
-        return column_value
-    except Exception as e  : 
-        raise Exception(f'Error {e} while decoding a value') 
+def decode_row(row_data , schema) : 
+    start_index = 0 
+    row = []
+    print(row_data)
+    for datatype in schema : 
+        if datatype == 'int32' : 
+           value = int.from_bytes(row_data[start_index:start_index+4] , 'big')
+           start_index+=4
+           row.append(value)
+        elif datatype == 'text' : 
+           len_of_text = int.from_bytes(row_data[start_index:start_index+2]) 
+           start_index+=2 
+           text = row_data[start_index:start_index+len_of_text]
+           start_index+=len_of_text
+           row.append(text)
+    return row 
 
 def encode_row(row , schema): 
     encoded_row = io.BytesIO()
     for column , datatype in zip(row , schema) : 
         encoded_column = Encoder.encode_value(column , datatype)
         encoded_row.write(encoded_column)
-    
-    return encoded_row.read()
+    encoded_row.seek(0)
+    encoded_row = encoded_row.read()
+    return encoded_row
+
 def decode_page(bin_file , page_number , schema) : 
     """
     this we will pass to it a binary file and a schema and it will decode it to original row .
     """
-    row = list()
+    rows = []
     bin_file.seek(page_number*PAGE_SIZE)
     page_data = bin_file.read(PAGE_SIZE)
     number_of_rows = int.from_bytes(page_data[0:2])
@@ -89,17 +72,19 @@ def decode_page(bin_file , page_number , schema) :
     if number_of_rows == 0  : 
        return None
     
-    for i in range(1 , number_of_rows+1) :  
+    for i in range(1 , number_of_rows+1) : 
         try : 
             range_start = int.from_bytes(page_data[i*2:(i+1)*2])
             row_data = page_data[range_start:range_end]
+            print(f"number of row is {i} ,  row_start  : {range_start} range_end : {range_end} ")
             range_end = range_start
-            decode_row()
+            row  = decode_row(row_data , schema) 
+            print(row)
         except Exception as e : 
             raise e
-        row.append(column)
+        rows.append(row)
     
-    return row
+    return rows
 ### we can make a class called Page     
 class Page : 
     ### the slotted_page will contain three main things the first the first two bytes and then we will add from then a refernce will take also  where this record finish 
@@ -110,13 +95,14 @@ class Page :
         self.data = bytearray(PAGE_SIZE)
         self.number_of_rows = 0
         self.schema = schema 
-        self.update_page_header()
         self.is_flushed = False
-    def update_page_header(self) : 
+    def update_page_header(self , refernce : int) : 
+        self.number_of_rows += 1 
         self.data[0:2] = self.number_of_rows.to_bytes(2)
+        self.data[self.number_of_rows*2 : self.number_of_rows*2+2] = refernce.to_bytes(2)
 
     def get_last_index_used(self) : 
-        reference_index = (self.number_of_rows+1)*2
+        reference_index = (self.number_of_rows)*2
         last_index_used = int.from_bytes(self.data[reference_index:reference_index+2])
         if last_index_used == 0 : 
            last_index_used = PAGE_SIZE  
@@ -124,17 +110,13 @@ class Page :
     
     def add_row(self , row) : 
         encoded_row = encode_row(row , self.schema)
-        ## we will add the encoded row to the page data 
-        ## we will the offest of the roww the offset means where the starts 
-        ## the index of the start f
-        
         row_end_range = self.get_last_index_used()
         row_start_range = row_end_range - len(encoded_row)
         if row_start_range < (self.number_of_rows+2)*2 : 
             return False
         self.data[row_start_range:row_end_range] = encoded_row     
-        self.number_of_rows += 1
-        self.update_page_header()
+        self.update_page_header(row_start_range)
+        print(f"number of row is  {self.number_of_rows} , row_start : {row_start_range} row_end : {row_end_range} " )
         return True
 
     def flush_on_disk(self) :
@@ -189,8 +171,14 @@ def read_db_file(file_path , schema) :
     with open(file_path ,'rb' ) as bin_file : 
         try :
             page_number = 0 
-            while decode_page(bin_file ,page_number , schema) : 
-                  page_number += 1 
+            while True : 
+                  page_rows = decode_page(bin_file ,page_number , schema)
+                  if page_rows is None : 
+                     db_result.extend(page_rows) 
+                     print(page_rows)
+                     page_number += 1 
+                  else : 
+                      break
         except  Exception as e  : 
                 print(e)
         finally : 
