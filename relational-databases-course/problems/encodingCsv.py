@@ -37,7 +37,6 @@ class Encoder :
 def decode_row(row_data , schema) : 
     start_index = 0 
     row = []
-    print(row_data)
     for datatype in schema : 
         if datatype == 'int32' : 
            value = int.from_bytes(row_data[start_index:start_index+4] , 'big')
@@ -125,7 +124,6 @@ class Page :
             f.seek(self.file_pointer)
             f.write(self.data)
         self.is_flushed = True
-
 
 
 
