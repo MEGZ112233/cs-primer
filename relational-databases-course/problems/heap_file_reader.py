@@ -1,6 +1,8 @@
 import csv
+import os 
 import encodingCsv
-
+from encodingCsv import PAGE_SIZE
+from pathlib import Path
 class CSVScan(object):
     """
     Yield all records from the given "table" in memory.
@@ -43,14 +45,13 @@ class HeapScan(object):
         self.number_of_consumed_pages = 0 
         self.page_data:bytes = None
         self.read_page()
-        self.row_index =  0 
+        self.row_index =  0  # zero indexed 
 
     def read_page(self) : 
         page_start_pointer = self.number_of_consumed_pages * encodingCsv.PAGE_SIZE
         with open(self.filepath , 'rb') as f : 
             f.seek(page_start_pointer)
             self.page_data = f.read(encodingCsv.PAGE_SIZE)
-            print(type(self.page_data))
         self.number_of_consumed_pages += 1
         self.row_index = 0 
         return 
@@ -58,9 +59,8 @@ class HeapScan(object):
     def get_row_index(self) : 
         start_range = int.from_bytes(self.page_data[(self.row_index+1)*2: (self.row_index+2)*2])
         end_range = encodingCsv.PAGE_SIZE
-        print(f'the row index : {self.row_index} the start_range {start_range} end_range {end_range}')
         if self.row_index != 0 : 
-            end_range = int.from_bytes(self.page_data[self.row_index*2:(self.row_index+1)*2])-1 
+            end_range = int.from_bytes(self.page_data[self.row_index*2:(self.row_index+1)*2]) 
         return start_range , end_range
 
     def decode_row(self , start_range , end_range) : 
@@ -75,7 +75,7 @@ class HeapScan(object):
             elif datatype == 'text' : 
                 len_of_text = int.from_bytes(row_data[start_index:start_index+2]) 
                 start_index+=2 
-                text = row_data[start_index:start_index+len_of_text]
+                text = row_data[start_index:start_index+len_of_text].decode('utf-8')
                 start_index+=len_of_text
                 row.append(text)
         return row 
@@ -95,7 +95,6 @@ class HeapScan(object):
         return row 
         ## handle when the we at the last index in page
         
-
 class readWholeCSVFile(object):
     def __init__(self, filepath , schema = None):
         self.filepath = filepath
@@ -119,7 +118,6 @@ class readWholeCSVFile(object):
         self.index += 1
         return x
     
-
 class MemoryScan(object):
     """
     Yield all records from the given "table" in memory.
@@ -209,8 +207,6 @@ class Selection(object):
             if x is None or self.predicate(x):
                 return x
             
-
-
 class Limit(object):
     """
     Return only as many as the limit, then stop
@@ -228,7 +224,6 @@ class Limit(object):
             return self.next()
         self.limit  -= 1
         return x
-
 
 class Sort(object):
     """
@@ -259,6 +254,132 @@ class Sort(object):
         return x
 
 
+    def __init__(self , table) : 
+        self.table = table 
+        self.index = 0 
+
+    def next(self) : 
+        if self.index >= len(self.table) : 
+            return None 
+        x = self.table[self.index]
+        self.index += 1
+        return x
+class Insert(object) :
+    ## 1-  know the page you start from (by knowing the size of the file and then divide it by page size ) (done)
+    ## 2- make only one place to read the page and one place to write in the page (to make it easier to handle the cache and the flushing to disk )(done)
+    ## 3- make using the number of consumed pages instead of file_pointer (done) . 
+    ## 4 - make it support writing multiple times and not overriding the old data (not done) .
+    def __init__(self , file_path  , schema) : 
+        self.file_path = file_path 
+        self.data = None
+        self.schema = schema 
+
+    def get_last_page_index(self) : 
+        """
+        main functionality : get the current page index in the file  (-1 if the file is empty)
+        """
+        file_size = os.path.getsize(self.file_path)
+        last_page_index = (file_size / PAGE_SIZE) - 1
+        last_page_index = int(last_page_index)
+        assert file_size % PAGE_SIZE == 0, f'the file size is {file_size} should  multiple of PAGE_SIZE'
+        return last_page_index
+
+    def get_number_of_row(self) : 
+        """
+        main :  get the number of rows in the current page 
+        """
+        current_page = self.get_data()
+        return int.from_bytes(current_page[0:2])
+    
+    def get_data(self):
+        """
+        main functionality : get the right current page 
+        1 - check if the self.data is None then read it from the file . 
+        2 - check if the file is empty (create the first page). 
+        3 - update the self.data (cached) to be used .
+        """ 
+        if self.data is None : 
+            current_page_ptr = self.get_last_page_index() * PAGE_SIZE
+            if current_page_ptr < 0 : 
+                self.initialize_page() 
+                current_page_ptr = self.get_last_page_index() * PAGE_SIZE
+            with open(self.file_path ,"rb") as f:
+                f.seek(current_page_ptr)
+                self.data = bytearray(f.read(PAGE_SIZE))
+        return self.data
+
+    def write_data(self, start_index, end_index, value) :
+        """
+        main functionalty  : it will get the newest page using get_data and then update it . 
+        note : end_index is exclusive
+        """
+        assert start_index <= end_index and end_index <=PAGE_SIZE , "wronge values for indexes in page writing  "
+        current_data = self.get_data()
+        current_data[start_index:end_index] = value
+        self.data = current_data 
+        return current_data
+
+    def update_page_header(self , refernce : int) : 
+        """
+        main functionality : it update the page header 
+        1 - update the number of rows 
+        2 - insert a refernce index for the new page 
+        """
+        number_of_rows = self.get_number_of_row() + 1
+        self.write_data(0, 2, number_of_rows.to_bytes(2))
+        self.write_data(number_of_rows*2, number_of_rows*2+2, refernce.to_bytes(2))
+
+    def get_new_ranges(self , length_of_row) : 
+        """
+        main functionality : get the indices of the new row 
+        """
+        reference_index = self.get_number_of_row()*2
+        current_data  = self.get_data()
+        last_index_used = int.from_bytes(current_data[reference_index:reference_index+2])
+        if last_index_used == 0 : 
+           last_index_used = PAGE_SIZE  
+        return {'start': last_index_used - length_of_row, 'end': last_index_used}
+    
+    def initialize_page(self):
+        """
+        main functionality : initialize a new page in the heap file 
+        actions : 
+        1 -  get last index of current index (zero if the file is empty). 
+        2 -  aquire a new page in the file . 
+        3 -  invalidate the chached data 
+        """
+        data = bytearray(PAGE_SIZE)
+        new_page_index = self.get_last_page_index()*PAGE_SIZE + PAGE_SIZE
+        with open(self.file_path , 'ab') as f :
+            f.seek(new_page_index)
+            f.write(data)
+        self.data = None 
+        return data
+        
+        
+    def next(self) : 
+        row = self.child.next()
+        if row is None : 
+            self.flush_on_disk()
+            return None
+        
+        encoded_row = encodingCsv.encode_row(row , self.schema)
+        ranges = self.get_new_ranges(len(encoded_row))
+        if (self.get_number_of_row()+2)*2 > ranges['start']: 
+            self.flush_on_disk()
+            self.initialize_page()
+            ranges = self.get_new_ranges(len(encoded_row))
+        self.write_data(ranges['start'], ranges['end'], encoded_row)
+        self.update_page_header(ranges['start'])
+        return row
+
+    def flush_on_disk(self) :
+        Path(self.file_path).touch(exist_ok=True)
+        with open(self.file_path , 'r+b') as f : 
+            last_page_index = self.get_last_page_index()    
+            f.seek(last_page_index* encodingCsv.PAGE_SIZE)
+            f.write(self.data)
+
 def Q(*nodes):
     """
     Construct a linked list of executor nodes from the given arguments,
@@ -267,7 +388,6 @@ def Q(*nodes):
     ns = iter(nodes)
     parent = root = next(ns)
     for n in ns:
-        print(n)
         parent.child = n
         parent = n
     return root
@@ -282,6 +402,8 @@ def run(q):
         if x is None:
             break
         yield x
+
+
 
 def test_memory_query_exceuter() : 
     birds = (
@@ -383,6 +505,48 @@ def test_csv_file_rating() :
     ))
     print(x)
 
+def test_insert_functionalty() : 
+    file_path = 'test.bin'  
+    Path.touch(file_path , exist_ok = True)  
+    schema = [
+        'int32',
+        'text',
+        'text'
+    ]
+    table = [
+        (1 , 'mohsen' , 'magdy'), 
+        (2 , 'mohsen1' , 'magdy'),
+        (3 , 'mohsen2', 'magdy'),
+        (4 , 'moshen4' , 'magdy')
+    ]
+    linked_list = tuple(
+        run(
+        Q(  
+            Insert(file_path , schema),
+            MemoryScan(table)
+        )
+    )
+    )
+    
+    linked_list = tuple(
+        run(
+        Q(  
+            Insert(file_path , schema),
+            HeapScan(file_path , schema)
+        )
+    )
+    )
+    table_after_insert = tuple(
+        run(
+        Q(
+
+            HeapScan(file_path ,schema)
+        )
+     )
+    ) 
+    length_of_table_after_insert = len(table_after_insert)
+    print(length_of_table_after_insert)
+
 def test_order_heap_file_reader() :
     csv_file_path = '/Users/ahmeali/Downloads/ml-20m/movies.csv'  # Path to your CSV file
     
@@ -402,13 +566,8 @@ def test_order_heap_file_reader() :
     print(wanted_output)
     
 if __name__ == '__main__':
-    # Test data generated by Claude and probably not accurate!
      
-    # test_memory_query_exceuter()
-    
-    # test_csv_file_movie_reader()
 
-    # test_csv_file_rating()
-    test_order_heap_file_reader()
+    test_insert_functionalty()
     pass 
 
