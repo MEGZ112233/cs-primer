@@ -156,7 +156,7 @@ class GroupBy(object):
             # read all child records and group them
             self.groups = {}
             while True:
-                x = self.child.next()
+                x = self.childs[0].next()
                 if x is None:
                     break
                 key = self.key_func(x)
@@ -183,7 +183,7 @@ class Projection(object):
         self.proj = proj
 
     def next(self):
-        x = self.child.next()
+        x = self.childs[0].next()
         if x is None:
             return None
         return self.proj(x)
@@ -203,7 +203,7 @@ class Selection(object):
 
     def next(self):
         while True:
-            x = self.child.next()
+            x = self.childs[0].next()
             if x is None or self.predicate(x):
                 return x
             
@@ -216,7 +216,7 @@ class Limit(object):
         self.offset = offset
 
     def next(self):
-        x = self.child.next()
+        x = self.childs[0].next()
         if x is None or self.limit  <= 0:
             return None
         if self.offset  > 0 :
@@ -239,7 +239,7 @@ class Sort(object):
     def next(self):
         if not self.sorted:
             while True:
-                x = self.child.next()
+                x = self.childs[0].next()
                 if x is None:
                     break
                 if self.arr is None:
@@ -359,7 +359,7 @@ class Insert(object) :
         
         
     def next(self) : 
-        row = self.child.next()
+        row = self.childs[0].next()
         if row is None : 
             self.flush_on_disk()
             return None
@@ -381,18 +381,36 @@ class Insert(object) :
             f.seek(last_page_index* encodingCsv.PAGE_SIZE)
             f.write(self.data)
 
-def Q(*nodes):
-    """
-    Construct a linked list of executor nodes from the given arguments,
-    starting with a root node, and adding references to each child
-    """
-    ns = iter(nodes)
-    parent = root = next(ns)
-    for n in ns:
-        parent.child = n
-        parent = n
-    return root
+# def Q(*nodes):
+#     """
+#     Construct a linked list of executor nodes from the given arguments,
+#     starting with a root node, and adding references to each child
+#     """
+#     ns = iter(nodes)
+#     parent = root = next(ns)
+#     for n in ns:
+#         if type(n) is Director  : 
+#         parent.child = n
+#         parent = n
+#     return root
 
+def QueryBuilder(nodes : list , parent = None) : 
+    """
+    constract a tree plan
+    """
+    # TODO :  make better names 
+    root  = None 
+    for i , parent_pointer in enumerate(parent) : 
+        if parent_pointer !=-1 : 
+           nodes[parent_pointer].childs = []     
+
+    for i, parent_pointer  in  enumerate(parent) : 
+        if parent_pointer != -1 :
+           nodes[parent_pointer].childs.append(nodes[i])
+        else : 
+           root = nodes[i] 
+    assert root is not None , 'the root should not be none'
+    return root
 
 def run(q):
     """
@@ -516,39 +534,35 @@ def test_insert_functionalty() :
         'text'
     ]
     table = [
-        (1 , 'mohsen' , 'magdy'), 
-        (2 , 'mohsen1' , 'magdy'),
-        (3 , 'mohsen2', 'magdy'),
-        (4 , 'moshen4' , 'magdy')
+        (1, 'mohsen', 'magdy'), 
+        (2, 'mohsen1', 'magdy'),
+        (3, 'mohsen2', 'magdy'),
+        (4, 'moshen3', 'magdy')
     ]
     linked_list = tuple(
-        run(
-        Q(  
-            Insert(file_path , schema),
-            MemoryScan(table)
+        run(  
+            QueryBuilder([Insert(file_path , schema),MemoryScan(table)], [-1,0])
         )
-    )
     )
     
     linked_list = tuple(
         run(
-        Q(  
+        QueryBuilder([
             Insert(file_path , schema),
             Limit(limit = 1024),
             HeapScan(file_path , schema)
+        ], 
+        [-1,0,1]
         )
     )
     ) 
     table_after_insert = tuple(
         run(
-        Q(
-
-            HeapScan(file_path ,schema)
+        QueryBuilder([HeapScan(file_path ,schema)],[-1])
         )
-     )
-    ) 
+    )
+    print(table_after_insert) 
     length_of_table_after_insert = len(table_after_insert)
-    print(length_of_table_after_insert)
 
 def test_order_heap_file_reader() :
     csv_file_path = '/Users/ahmeali/Downloads/ml-20m/movies.csv'  # Path to your CSV file
