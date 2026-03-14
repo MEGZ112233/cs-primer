@@ -281,6 +281,7 @@ class Insert(object) :
         file_size = os.path.getsize(self.file_path)
         last_page_index = (file_size / PAGE_SIZE) - 1
         last_page_index = int(last_page_index)
+        print(f'the file size is {file_size} , the last page index is {last_page_index}')
         assert file_size % PAGE_SIZE == 0, f'the file size is {file_size} should  multiple of PAGE_SIZE'
         return last_page_index
 
@@ -471,6 +472,7 @@ def test_memory_query_exceuter() :
     print('ok') 
 
 
+
 def test_csv_file_movie_reader() : 
     csv_file_path = ''  # Path to your CSV file
     movie_csv_schema = (
@@ -532,10 +534,11 @@ def test_insert_functionalty() :
         run(
         Q(  
             Insert(file_path , schema),
+            Limit(limit = 1024),
             HeapScan(file_path , schema)
         )
     )
-    )
+    ) 
     table_after_insert = tuple(
         run(
         Q(
