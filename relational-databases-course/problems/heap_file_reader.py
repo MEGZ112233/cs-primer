@@ -445,45 +445,45 @@ def test_memory_query_exceuter() :
     )
 
     # ids of non US birds
-    assert tuple(run(Q(
+    assert tuple(run(QueryBuilder([
         Projection(lambda x: (x[0],)),
         Selection(lambda x: not x[3]),
         MemoryScan(birds)
-    ))) == (
+    ], [-1, 0, 1]))) == (
         ('ostric1',),
         ('emppen1',),
         ('wanalb',),
     )
     
     # id and weight of 3 heaviest birds
-    assert tuple(run(Q(
+    assert tuple(run(QueryBuilder([
         Projection(lambda x: (x[0], x[2])),
         Limit(3),
         Sort(lambda x: x[2], desc=True),
         MemoryScan(birds),
-    ))) == (
+    ], [-1, 0, 1, 2]))) == (
         ('ostric1', 104.0),
         ('emppen1', 23.0),
         ('wanalb', 8.5),
     )
     ## id and weight of 3 lightest birds skipping the lightest one
-    assert tuple(run(Q(
+    assert tuple(run(QueryBuilder([
         Projection(lambda x: (x[0], x[2])),
         Limit(limit = 3, offset=1),
         Sort(lambda x: x[2], desc=False),
         MemoryScan(birds),
-    ))) == (
+    ], [-1, 0, 1, 2]))) == (
         ('barswa', 0.019),
         ('norcar', 0.045),
         ('amerob', 0.077),
     )
     ## test the group by and aggregation sum of the third field (weight)
 
-    assert tuple(run(Q(
+    assert tuple(run(QueryBuilder([
         GroupBy(lambda x: x[3], lambda key, records: (key, sum(r[2] for r in records))),
         Sort(lambda x: x[3]),
         MemoryScan(birds),
-    ))) == (
+    ], [-1, 0, 1]))) == (
         (False, 135.5),
         (True, 6.1664),
     ) 
@@ -500,11 +500,11 @@ def test_csv_file_movie_reader() :
     )
     x = tuple(run(
 
-        Q(  GroupBy(lambda _: 1, lambda key, records: (key, len(records)) ),
+        QueryBuilder([  GroupBy(lambda _: 1, lambda key, records: (key, len(records)) ),
             Selection(lambda x: x[0]%10==0 ),
             Limit(100),
             CSVScan(csv_file_path, movie_csv_schema)
-        )
+        ], [-1, 0, 1, 2])
     ))
 
     assert x == ((1, 10),) , 'the value of x is : ' + str(x)
@@ -518,10 +518,10 @@ def test_csv_file_rating() :
         ('timestamp', int),
     )
     x = tuple(run(
-        Q( 
+        QueryBuilder([ 
             Selection(lambda x: x[0]%777==0 ),
             readWholeCSVFile(csv_file_path, rating_csv_schema)
-        )
+        ], [-1, 0])
     ))
     print(x)
 
@@ -575,9 +575,9 @@ def test_order_heap_file_reader() :
     ]
     encodingCsv.convert_csv_file_to_binary_format(csv_file_path , schema)
     x = tuple(run(
-        Q( 
+        QueryBuilder([ 
             HeapScan(heap_file_path , schema)
-        )
+        ], [-1])
     ))
     wanted_output = x[-2:]
     print(wanted_output)
