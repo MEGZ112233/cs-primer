@@ -42,10 +42,7 @@ class HeapScan(object):
     def __init__(self , filepath , schema = None) : 
         self.filepath = filepath
         self.schema = schema 
-        self.number_of_consumed_pages = 0 
-        self.page_data:bytes = None
-        self.read_page()
-        self.row_index =  0  # zero indexed 
+        self.reset()
 
     def read_page(self) : 
         page_start_pointer = self.number_of_consumed_pages * encodingCsv.PAGE_SIZE
@@ -94,7 +91,12 @@ class HeapScan(object):
            self.read_page()
         return row 
         ## handle when the we at the last index in page
-        
+
+    def reset(self) :
+        self.number_of_consumed_pages = 0 
+        self.page_data:bytes = None
+        self.read_page()
+        self.row_index =  0  # zero indexed    
 class readWholeCSVFile(object):
     def __init__(self, filepath , schema = None):
         self.filepath = filepath
@@ -103,7 +105,7 @@ class readWholeCSVFile(object):
         self.index = 0 
         with open(self.filepath , 'r' , newline='' , encoding='utf-8') as f:
             reader = csv.reader(f)
-            header = next(reader)
+            next(reader)
             for row in reader:
                 if self.schema:
                     for i in range(len(self.schema)):
@@ -127,7 +129,7 @@ class MemoryScan(object):
     """
     def __init__(self, table):
         self.table = table
-        self.idx = 0
+        self.reset()
 
     def next(self):
         if self.idx >= len(self.table):
@@ -136,6 +138,9 @@ class MemoryScan(object):
         x = self.table[self.idx]
         self.idx += 1
         return x
+    
+    def reset(self) :
+        self.idx = 0
 class GroupBy(object):
     """
     Group the child records using the given key function, and aggregate
@@ -148,31 +153,37 @@ class GroupBy(object):
         self.key_func = key_func
         self.agg_func = agg_func
         self.groups = None
+        self.is_computed = False
         self.group_keys = None
         self.idx = 0
-
+    
+    def group_records(self) :
+        self.groups = {}
+        while True:
+            x = self.childs[0].next()
+            if x is None:
+                break
+            key = self.key_func(x)
+            if key not in self.groups:
+                self.groups[key] = []
+            self.groups[key].append(x) 
+        self.group_keys = list(self.groups.keys())
+        self.idx = 0
+    
     def next(self):
-        if self.groups is None:
-            # read all child records and group them
-            self.groups = {}
-            while True:
-                x = self.childs[0].next()
-                if x is None:
-                    break
-                key = self.key_func(x)
-                if key not in self.groups:
-                    self.groups[key] = []
-                self.groups[key].append(x)
-            self.group_keys = list(self.groups.keys())
-
+        if not self.is_computed:
+            self.group_records()
         if self.idx >= len(self.group_keys):
             return None
 
         key = self.group_keys[self.idx]
         records = self.groups[key]
         self.idx += 1
-        result = self.agg_func(key, records)
-        return result
+        row = self.agg_func(key, records)
+        return row
+    
+    def reset(self) :
+        self.idx = 0
 
 class Projection(object):
     """
@@ -212,6 +223,7 @@ class Limit(object):
     Return only as many as the limit, then stop
     """
     def __init__(self, limit ,  offset=0):
+        self.original_limit = limit
         self.limit = limit
         self.offset = offset
 
@@ -224,6 +236,9 @@ class Limit(object):
             return self.next()
         self.limit  -= 1
         return x
+    
+    def reset(self): 
+        self.limit = self.original_limit
 
 class Sort(object):
     """
@@ -235,35 +250,29 @@ class Sort(object):
         self.arr = None
         self.idx = 0
         self.sorted = False
+    def compute(self):
         
-    def next(self):
-        if not self.sorted:
-            while True:
+        while True:
                 x = self.childs[0].next()
                 if x is None:
                     break
                 if self.arr is None:
                     self.arr = []
                 self.arr.append(x)
-            self.arr = sorted(self.arr, key=self.key, reverse=self.desc)
-            self.sorted = True
+        self.arr = sorted(self.arr, key=self.key, reverse=self.desc)
+        self.sorted = True 
+
+    def next(self):
+        if not self.sorted:
+           self.compute 
         if self.arr is None or self.idx >= len(self.arr):
             return None
         x = self.arr[self.idx]
         self.idx += 1
         return x
-
-
-    def __init__(self , table) : 
-        self.table = table 
+    def reset(self) : 
         self.index = 0 
 
-    def next(self) : 
-        if self.index >= len(self.table) : 
-            return None 
-        x = self.table[self.index]
-        self.index += 1
-        return x
 class Insert(object) :
     ## 1-  know the page you start from (by knowing the size of the file and then divide it by page size ) (done)
     ## 2- make only one place to read the page and one place to write in the page (to make it easier to handle the cache and the flushing to disk )(done)
@@ -381,18 +390,6 @@ class Insert(object) :
             f.seek(last_page_index* encodingCsv.PAGE_SIZE)
             f.write(self.data)
 
-# def Q(*nodes):
-#     """
-#     Construct a linked list of executor nodes from the given arguments,
-#     starting with a root node, and adding references to each child
-#     """
-#     ns = iter(nodes)
-#     parent = root = next(ns)
-#     for n in ns:
-#         if type(n) is Director  : 
-#         parent.child = n
-#         parent = n
-#     return root
 
 def QueryBuilder(nodes : list , parent = None) : 
     """
@@ -491,8 +488,8 @@ def test_memory_query_exceuter() :
 
 
 
-def test_csv_file_movie_reader() : 
-    csv_file_path = ''  # Path to your CSV file
+def test_group_by_node() : 
+    file_path = '' 
     movie_csv_schema = (
         ('movieId', int),
         ('title', str),
@@ -584,6 +581,14 @@ def test_order_heap_file_reader() :
     
 if __name__ == '__main__':
      
+    # main thoughts 
+    # 1 -  make a reset function for most of all nodes  . 
+    # 2 -  make a node for join that will have at maximum to childs 
+    # 3 -  in next function at join we will consume the next of the first child and iterate through the seond baby 
+    # 4 -  we need to formalize the returned row i mean the formate of it 
+
+    # reset logic 
+    # 
 
     test_insert_functionalty()
     pass 
