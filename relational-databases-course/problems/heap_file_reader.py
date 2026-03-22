@@ -20,6 +20,14 @@ class CSVScan(object):
             self.header = csv.reader([header_line.decode('utf-8')]).__next__()
             self.offset = f.tell()
 
+    def cast_variable(self,type_str, value) :
+        if type_str == 'int32'  : 
+           return int(value)  
+        elif type_str == 'text' : 
+            return str(value) 
+        else :
+            raise ValueError(f'type : {type_str} is not supported in our DB')
+        
     def next(self):
         with open(self.filepath , 'rb') as f:
             try : 
@@ -31,12 +39,14 @@ class CSVScan(object):
                 self.offset = f.tell()
                 if  self.schema :
                     for i in range(len(self.schema)):
-                        _, field_type = self.schema[i]
-                        row[i] = field_type(row[i])
+                        field_type = self.schema[i]
+                        row[i] = self.cast_variable(field_type,row[i])
+
                 return tuple(row)
             except Exception as e:
                 print("Error reading file:", e)
                 return None
+
 
 class HeapScan(object):
     def __init__(self , filepath , schema = None) : 
@@ -282,6 +292,10 @@ class Insert(object) :
         self.file_path = file_path 
         self.data = None
         self.schema = schema 
+        self.create_file_if_not_exists()
+    
+    def create_file_if_not_exists(self) :
+        Path(self.file_path).touch(exist_ok=True)
 
     def get_last_page_index(self) : 
         """
@@ -389,11 +403,37 @@ class Insert(object) :
             last_page_index = self.get_last_page_index()    
             f.seek(last_page_index* encodingCsv.PAGE_SIZE)
             f.write(self.data)
+class NestedLoopJoin(object) :
+    def __init__(self):
+        self.left_value = None 
+    
+    def next(self):
+        assert self.childs[0] or self.childs[1] , 'the join must have atleast two childrens' 
+        ## if first is none get it , always get the second one , if second one is None reset it and call both first and second one  
+        if self.left_value is None : 
+           self.left_value =  self.childs[0].next()
+           if self.left_value is None :
+              return None 
+        right_value = self.childs[1].next()
+        if right_value is None : 
+           self.left_value =  self.childs[0].next()
+           if self.left_value is None :
+              return None 
+           self.childs[1].reset() 
+           right_value = self.childs[1].next()
+           assert right_value , 'right table should reseting have at least one value'
+        
+        #TODO : formate the returned row 
+        result = (self.left_value , right_value)
+        return result 
 
+    def reset(self):
+        self.childs[0].reset() 
+        self.childs[1].reset()
 
-def QueryBuilder(nodes : list , parent = None) : 
+def QueryBuilder(nodes : list , parent:list) : 
     """
-    constract a tree plan
+    constract a tree plan ,  parent list assumes the nodes are zero indexed
     """
     # TODO :  make better names 
     root  = None 
@@ -578,18 +618,73 @@ def test_order_heap_file_reader() :
     ))
     wanted_output = x[-2:]
     print(wanted_output)
+def delete_files_after_test(file_paths:list):
+    for file_path in file_paths : 
+        if os.path.exists(file_path) :
+           os.remove(file_path) 
+
+def test_nested_loop_join():
+    # Test plan 
+    # 1 - read 5 rows from movies DB 
+    # 2 -  insert them into our file 
+    # 3 -  make a join that reads from that file to make the cartisian products 
+    # 4 -  check the results 
+    try : 
+        file_name = 'test_nested_loop.bin'
+        movies_path = '/Users/ahmeali/Downloads/ml-20m/movies.csv'
+        schema = [
+            'int32',
+            'text',
+            'text'
+        ]
+        insert_result = tuple(
+            run(
+                QueryBuilder([
+                    Insert(file_name,schema),
+                    Limit(2,0),
+                    CSVScan(movies_path,schema)
+                ], 
+                [
+                -1,
+                0,
+                1 
+                ]
+                )
+            )
+        )
+
+        join_result = tuple(
+            run(
+                QueryBuilder(
+                    [
+                    NestedLoopJoin(),
+                    HeapScan(file_name, schema),
+                    HeapScan(file_name, schema)
+                    ],
+                    [
+                        -1,
+                        0,
+                        0   
+                    ]
+                )
+            )
+        )
+        print('ok')
+    except Exception as e  : 
+        print(f'Exception!:  {e}')
+    finally :
+        delete_files_after_test([file_name])
+
     
 if __name__ == '__main__':
      
     # main thoughts 
-    # 1 -  make a reset function for most of all nodes  . 
-    # 2 -  make a node for join that will have at maximum to childs 
-    # 3 -  in next function at join we will consume the next of the first child and iterate through the seond baby 
-    # 4 -  we need to formalize the returned row i mean the formate of it 
+    # 1 -  make a reset function for most of all nodes  (done) . 
+    # 2 -  make a node for join that will have at most two childs (done). 
+    # 3 -  in next function at join we will consume the next of the first child and iterate through the seond baby (done)
+    # 5 -  think about formatting the output not in join but in general .
+    # 6 -  reset logic for all outputes 
 
-    # reset logic 
-    # 
-
-    test_insert_functionalty()
+    test_nested_loop_join()
     pass 
 
