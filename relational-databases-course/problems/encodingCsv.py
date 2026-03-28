@@ -1,5 +1,5 @@
 import csv
-
+from models import Schema
 import string
 from typing import Callable
 from pathlib import Path
@@ -50,10 +50,13 @@ def decode_row(row_data , schema) :
            row.append(text)
     return row 
 
-def encode_row(row , schema): 
+def encode_row(row , schema:Schema): 
     encoded_row = io.BytesIO()
-    for column , datatype in zip(row , schema) : 
-        encoded_column = Encoder.encode_value(column , datatype)
+    
+    for column_name , datatype in  schema.columns.items() : 
+        column_index = f"{schema.table_name}.{column_name}"
+        value = row[column_index]
+        encoded_column = Encoder.encode_value(value , datatype)
         encoded_row.write(encoded_column)
     encoded_row.seek(0)
     encoded_row = encoded_row.read()

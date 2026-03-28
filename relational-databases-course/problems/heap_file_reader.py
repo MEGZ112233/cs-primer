@@ -1,5 +1,7 @@
 import csv
 import os 
+from dataclasses import dataclass
+from models import Schema
 import encodingCsv
 from encodingCsv import PAGE_SIZE
 from pathlib import Path
@@ -10,7 +12,7 @@ class CSVScan(object):
     This is really just for testing... in the future our scan nodes
     will read from disk.
     """
-    def __init__(self, filepath , schema = None):
+    def __init__(self, filepath , schema:Schema):
         self.filepath = filepath
         self.offset = 0
         self.schema = schema
@@ -19,6 +21,7 @@ class CSVScan(object):
             header_line = f.readline()
             self.header = csv.reader([header_line.decode('utf-8')]).__next__()
             self.offset = f.tell()
+        assert set(self.schema.columns.keys()) == set(self.header) , 'column names in the schema should be the same as column names in the csv file'
 
     def cast_variable(self,type_str, value) :
         if type_str == 'int32'  : 
@@ -37,19 +40,22 @@ class CSVScan(object):
                 if not row:
                     return None
                 self.offset = f.tell()
+                final_row = {}
                 if  self.schema :
-                    for i in range(len(self.schema)):
-                        field_type = self.schema[i]
-                        row[i] = self.cast_variable(field_type,row[i])
-
-                return tuple(row)
+                    for column_name, column_type in self.schema.columns.items():
+                        value_index = self.header.index(column_name)
+                        final_row[f'{self.schema.table_name}.{column_name}'] = self.cast_variable(column_type,row[value_index])
+                return final_row
+            
             except Exception as e:
                 print("Error reading file:", e)
                 return None
 
+#  1 - make the formate a dictionary (column names as keys) and values . 
+
 
 class HeapScan(object):
-    def __init__(self , filepath , schema = None) : 
+    def __init__(self , filepath, schema: Schema ) : 
         self.filepath = filepath
         self.schema = schema 
         self.reset()
@@ -73,20 +79,23 @@ class HeapScan(object):
     def decode_row(self , start_range , end_range) : 
         start_index = 0 
         row_data = self.page_data[start_range : end_range]
-        row = []
-        for datatype in self.schema : 
+        row = {}
+        for column_name, datatype in self.schema.columns.items(): 
+            value = None
             if datatype == 'int32' : 
                 value = int.from_bytes(row_data[start_index:start_index+4] , 'big')
                 start_index+=4
-                row.append(value)
             elif datatype == 'text' : 
                 len_of_text = int.from_bytes(row_data[start_index:start_index+2]) 
                 start_index+=2 
-                text = row_data[start_index:start_index+len_of_text].decode('utf-8')
+                value = row_data[start_index:start_index+len_of_text].decode('utf-8')
                 start_index+=len_of_text
-                row.append(text)
+            
+            column_index = f"{self.schema.table_name}.{column_name}"
+            row[column_index] = value
+            
         return row 
-
+    
     def next(self) : 
         """
         get next row 
@@ -288,7 +297,7 @@ class Insert(object) :
     ## 2- make only one place to read the page and one place to write in the page (to make it easier to handle the cache and the flushing to disk )(done)
     ## 3- make using the number of consumed pages instead of file_pointer (done) . 
     ## 4 - make it support writing multiple times and not overriding the old data (not done) .
-    def __init__(self , file_path  , schema) : 
+    def __init__(self , file_path  , schema:Schema) : 
         self.file_path = file_path 
         self.data = None
         self.schema = schema 
@@ -304,7 +313,6 @@ class Insert(object) :
         file_size = os.path.getsize(self.file_path)
         last_page_index = (file_size / PAGE_SIZE) - 1
         last_page_index = int(last_page_index)
-        print(f'the file size is {file_size} , the last page index is {last_page_index}')
         assert file_size % PAGE_SIZE == 0, f'the file size is {file_size} should  multiple of PAGE_SIZE'
         return last_page_index
 
@@ -386,7 +394,6 @@ class Insert(object) :
         if row is None : 
             self.flush_on_disk()
             return None
-        
         encoded_row = encodingCsv.encode_row(row , self.schema)
         ranges = self.get_new_ranges(len(encoded_row))
         if (self.get_number_of_row()+2)*2 > ranges['start']: 
@@ -405,7 +412,7 @@ class Insert(object) :
             f.write(self.data)
 class NestedLoopJoin(object) :
     def __init__(self):
-        self.left_value = None 
+        self.left_value:dict = None 
     
     def next(self):
         assert self.childs[0] or self.childs[1] , 'the join must have atleast two childrens' 
@@ -423,8 +430,9 @@ class NestedLoopJoin(object) :
            right_value = self.childs[1].next()
            assert right_value , 'right table should reseting have at least one value'
         
-        #TODO : formate the returned row 
-        result = (self.left_value , right_value)
+        #TODO : a row is always a dictionary a flatten row of both two rows 
+        result = self.left_value
+        result.update(right_value) 
         return result 
 
     def reset(self):
@@ -560,7 +568,6 @@ def test_csv_file_rating() :
             readWholeCSVFile(csv_file_path, rating_csv_schema)
         ], [-1, 0])
     ))
-    print(x)
 
 def test_insert_functionalty() : 
     file_path = 'test.bin'  
@@ -598,7 +605,6 @@ def test_insert_functionalty() :
         QueryBuilder([HeapScan(file_path ,schema)],[-1])
         )
     )
-    print(table_after_insert) 
     length_of_table_after_insert = len(table_after_insert)
 
 def test_order_heap_file_reader() :
@@ -617,7 +623,7 @@ def test_order_heap_file_reader() :
         ], [-1])
     ))
     wanted_output = x[-2:]
-    print(wanted_output)
+
 def delete_files_after_test(file_paths:list):
     for file_path in file_paths : 
         if os.path.exists(file_path) :
@@ -632,17 +638,27 @@ def test_nested_loop_join():
     try : 
         file_name = 'test_nested_loop.bin'
         movies_path = '/Users/ahmeali/Downloads/ml-20m/movies.csv'
-        schema = [
-            'int32',
-            'text',
-            'text'
-        ]
-        insert_result = tuple(
+        schema1 = Schema(
+            table_name = 'movies1',
+            columns = {
+                'movieId' : 'int32',
+                'title' : 'text',
+                'genres' : 'text'
+            })
+    
+        schema2 = Schema(
+            table_name = 'movies2',
+            columns = {
+                'movieId' : 'int32',
+                'title' : 'text',
+                'genres' : 'text'
+            })
+        insert_result = list(
             run(
                 QueryBuilder([
-                    Insert(file_name,schema),
+                    Insert(file_name,schema1),
                     Limit(2,0),
-                    CSVScan(movies_path,schema)
+                    CSVScan(movies_path,schema1)
                 ], 
                 [
                 -1,
@@ -653,13 +669,13 @@ def test_nested_loop_join():
             )
         )
 
-        join_result = tuple(
+        join_result = list(
             run(
                 QueryBuilder(
                     [
                     NestedLoopJoin(),
-                    HeapScan(file_name, schema),
-                    HeapScan(file_name, schema)
+                    HeapScan(file_name, schema1),
+                    HeapScan(file_name, schema2)
                     ],
                     [
                         -1,
@@ -679,11 +695,8 @@ def test_nested_loop_join():
 if __name__ == '__main__':
      
     # main thoughts 
-    # 1 -  make a reset function for most of all nodes  (done) . 
-    # 2 -  make a node for join that will have at most two childs (done). 
-    # 3 -  in next function at join we will consume the next of the first child and iterate through the seond baby (done)
-    # 5 -  think about formatting the output not in join but in general .
-    # 6 -  reset logic for all outputes 
+    # 1 - make the retuned row to be a dictionary 
+    # 2 - use the new schema class 
 
     test_nested_loop_join()
     pass 
