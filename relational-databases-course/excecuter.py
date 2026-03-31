@@ -236,6 +236,9 @@ class Selection(object):
             x = self.childs[0].next()
             if x is None or self.predicate(x):
                 return x
+    
+    def reset(self) :
+        self.childs[0].reset()
             
 class Limit(object):
     """
@@ -256,7 +259,8 @@ class Limit(object):
         self.limit  -= 1
         return x
     
-    def reset(self): 
+    def reset(self):
+        self.childs[0].reset() 
         self.limit = self.original_limit
 
 class Sort(object):
@@ -430,13 +434,14 @@ class NestedLoopJoin(object) :
            right_value = self.childs[1].next()
            assert right_value , 'right table should reseting have at least one value'
         
-        #TODO : a row is always a dictionary a flatten row of both two rows 
-        result = self.left_value
-        result.update(right_value) 
-        return result 
+        # Note: a row is always a dictionary with flattened fields from both rows.
+        # Return a fresh merged dictionary so callers do not receive a reused dict object.
+        result = self.left_value.copy()
+        result.update(right_value)
+        return result
 
     def reset(self):
-        self.childs[0].reset() 
+        self.childs[0].reset()
         self.childs[1].reset()
 
 def QueryBuilder(nodes : list , parent:list) : 
@@ -463,6 +468,7 @@ def run(q):
     """
     while True:
         x = q.next()
+        # print(f"got {x} from node {type(q).__name__}")
         if x is None:
             break
         yield x
@@ -629,75 +635,8 @@ def delete_files_after_test(file_paths:list):
         if os.path.exists(file_path) :
            os.remove(file_path) 
 
-def test_nested_loop_join():
-    # Test plan 
-    # 1 - read 5 rows from movies DB 
-    # 2 -  insert them into our file 
-    # 3 -  make a join that reads from that file to make the cartisian products 
-    # 4 -  check the results 
-    try : 
-        file_name = 'test_nested_loop.bin'
-        movies_path = '/Users/ahmeali/Downloads/ml-20m/movies.csv'
-        schema1 = Schema(
-            table_name = 'movies1',
-            columns = {
-                'movieId' : 'int32',
-                'title' : 'text',
-                'genres' : 'text'
-            })
-    
-        schema2 = Schema(
-            table_name = 'movies2',
-            columns = {
-                'movieId' : 'int32',
-                'title' : 'text',
-                'genres' : 'text'
-            })
-        insert_result = list(
-            run(
-                QueryBuilder([
-                    Insert(file_name,schema1),
-                    Limit(2,0),
-                    CSVScan(movies_path,schema1)
-                ], 
-                [
-                -1,
-                0,
-                1 
-                ]
-                )
-            )
-        )
-
-        join_result = list(
-            run(
-                QueryBuilder(
-                    [
-                    NestedLoopJoin(),
-                    HeapScan(file_name, schema1),
-                    HeapScan(file_name, schema2)
-                    ],
-                    [
-                        -1,
-                        0,
-                        0   
-                    ]
-                )
-            )
-        )
-        print('ok')
-    except Exception as e  : 
-        print(f'Exception!:  {e}')
-    finally :
-        delete_files_after_test([file_name])
-
     
 if __name__ == '__main__':
      
-    # main thoughts 
-    # 1 - make the retuned row to be a dictionary 
-    # 2 - use the new schema class 
-
-    test_nested_loop_join()
     pass 
 
