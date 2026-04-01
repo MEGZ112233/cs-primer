@@ -420,22 +420,20 @@ class NestedLoopJoin(object) :
     
     def next(self):
         assert self.childs[0] or self.childs[1] , 'the join must have atleast two childrens' 
+
         ## if first is none get it , always get the second one , if second one is None reset it and call both first and second one  
-        if self.left_value is None : 
-           self.left_value =  self.childs[0].next()
-           if self.left_value is None :
-              return None 
         right_value = self.childs[1].next()
         if right_value is None : 
-           self.left_value =  self.childs[0].next()
-           if self.left_value is None :
-              return None 
+           self.left_value = None
            self.childs[1].reset() 
            right_value = self.childs[1].next()
-           assert right_value , 'right table should reseting have at least one value'
+
+        if self.left_value is None : 
+           self.left_value =  self.childs[0].next()
         
-        # Note: a row is always a dictionary with flattened fields from both rows.
-        # Return a fresh merged dictionary so callers do not receive a reused dict object.
+        if self.left_value is None or right_value is None :
+            return None
+        
         result = self.left_value.copy()
         result.update(right_value)
         return result
