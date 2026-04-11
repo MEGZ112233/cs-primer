@@ -5,6 +5,8 @@ from models import Schema
 import encodingCsv
 from encodingCsv import PAGE_SIZE
 from pathlib import Path
+from collections import defaultdict
+from utils import format_row
 class CSVScan(object):
     """
     Yield all records from the given "table" in memory.
@@ -146,17 +148,19 @@ class MemoryScan(object):
     This is really just for testing... in the future our scan nodes
     will read from disk.
     """
-    def __init__(self, table):
+    def __init__(self, schema:Schema,  table):
         self.table = table
+        self.schema = schema
         self.reset()
 
     def next(self):
         if self.idx >= len(self.table):
             return None
 
-        x = self.table[self.idx]
+        row = self.table[self.idx]
+        formatted_row = format_row(row, self.schema)
         self.idx += 1
-        return x
+        return formatted_row
     
     def reset(self) :
         self.idx = 0
@@ -441,6 +445,82 @@ class NestedLoopJoin(object) :
     def reset(self):
         self.childs[0].reset()
         self.childs[1].reset()
+
+# 1 -  make a test plan 
+#   -  make a memory scan memek a rating and movies the tha rating some movies will not have a rating we should assert that the number of rows is the numbwer of rating rows have movies in movies table 
+# 2 - make the structure of the class 
+#.    -  will have a function that take the un-hashed table and create a key to search for the hashed table , a second one that take a row and create a hashed key to be saved in dictionary DS 
+# 3 - implement the logic 
+# 4 - implemente the test 
+# 5 - run the test of it 
+# 6 -  watch the vidio 
+# 
+class HashJoin(object):
+    def __init__(self, get_hash_key_hashed_table, get_hash_key_iterated_table) :
+        """
+         this function take two functions as attributes 
+           -  get_hash_key_hashed_table
+           -  get_hash_key_iterated_table
+           then initialeze a hashed table (dict[key,list])
+           we always assume that child0 is the table will be hashed  child1 is that one that will be iterated (it preferable that the left one is the smaller one )
+        """
+        self.get_hash_key_hashed_table = get_hash_key_hashed_table
+        self.get_hash_key_iterated_table = get_hash_key_iterated_table
+        self.hashed_table = defaultdict(list)
+        self.is_hashed = 0 
+        self.buffered_array = None
+        self.right_row = None
+     
+    def hash_the_table(self):
+        """
+        this function will iterate through the hashable table and hash it using the get_hash_key_hashed_table
+        """     
+        while True: 
+            row = self.childs[0].next()
+            if row is None : 
+               break 
+            hash_key = self.get_hash_key_hashed_table(row)
+            self.hashed_table[hash_key].append(row)
+
+        self.is_hashed = 1 
+             
+
+    def get_buffered_row(self):
+        
+        if self.buffered_array is not None and len(self.buffered_array) > 0 : 
+            row = self.buffered_array.pop()
+            if len(self.buffered_array) == 0 : 
+               self.buffered_array = None
+            return  row 
+        return None
+    
+    def next(self):
+        if self.is_hashed == 0 : 
+           self.hash_the_table()  
+        
+        while True :
+            if self.right_row is None :  
+                self.right_row  = self.childs[1].next()
+            
+                if self.right_row is None : 
+                    return None 
+                hash_key = self.get_hash_key_iterated_table(self.right_row)
+                self.buffered_array = self.hashed_table.get(hash_key,[]).copy()
+            left_row = self.get_buffered_row()
+            
+            if left_row is not None :
+               result = left_row.copy()
+               result.update(self.right_row)
+               return result
+            else : 
+                self.right_row = None 
+
+            
+    
+    def reset(self) :
+        self.childs[0].reset()
+        
+
 
 def QueryBuilder(nodes : list , parent:list) : 
     """

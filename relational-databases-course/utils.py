@@ -25,4 +25,14 @@ def delete_files_after_test(file_names:list):
         if os.path.exists(file_path) :
            os.remove(file_path) 
 
+def format_row(row, schema:Schema):
+    # TODO :  make and scan Node to use this function 
+    formatted_row = {}
+    index = 0 
+    for column_name, type in schema.columns.items() : 
+        formatted_row[f"{schema.table_name}.{column_name}"] = row[index]
+        index += 1 
+
+    return formatted_row
+
 
