@@ -519,6 +519,8 @@ class HashJoin(object):
     
     def reset(self) :
         self.childs[0].reset()
+        self.buffered_array = None
+        self.right_row = None
         
 
 
@@ -537,6 +539,7 @@ def QueryBuilder(nodes : list , parent:list) :
            nodes[parent_pointer].childs.append(nodes[i])
         else : 
            root = nodes[i] 
+           
     assert root is not None , 'the root should not be none'
     return root
 
