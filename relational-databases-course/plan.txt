@@ -1,0 +1,11 @@
+1 - know the sort merge
+2 - design the the test plan
+3 - divide the implementation part
+4 - [1,2,2,2,3,4,5][2,2,3,4,5,6] we will do a comperator function
+  - you will have some codes returned by comperator
+  - -1 call next Left with no match  .
+  -  1 call next Right with no match .
+  -  2 call next Right with match .
+  - -2 call next Left with match .
+5 - start to implement
+6 - watch the video
