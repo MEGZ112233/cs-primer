@@ -490,8 +490,10 @@ class NestedLoopJoin(object):
 
 
 class SortMergeJoin(object):
-    def __init__(self, comperator):
+    def __init__(self, comperator, left_key, right_key):
         self.comperator = comperator
+        self.left_key = left_key
+        self.right_key = right_key
         self.last_left = None
         self.last_left_result = []
         self.left_row = None
@@ -508,7 +510,7 @@ class SortMergeJoin(object):
                 self.current_left_result.append(row)
                 return row
 
-            action: SortMergeActions = self.comperator(self.left_row, self.right_row)
+            action: SortMergeActions = self.comperator(self.left_key, self.right_key, self.left_row, self.right_row)
             result = None
             if action == SortMergeActions.GET_LEFT_MATCH:
                 row = self.childs[0].next()

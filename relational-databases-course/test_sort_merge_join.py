@@ -8,9 +8,9 @@ sequence1_table = [[1], [2], [2], [2], [3], [4], [5]]
 sequence2_table = [[2], [2], [3], [3], [4], [5], [6]]
 
 
-def comperator(left_row, right_row):
-    left_value = left_row["sequence1.number"] if left_row else None
-    right_value = right_row["sequence2.number"] if right_row else None
+def comperator(left_key, right_key, left_row, right_row):
+    left_value = left_row[left_key] if left_row else None
+    right_value = right_row[right_key] if right_row else None
     if left_value is None:
         return SortMergeActions.GET_LEFT_NO_MATCH
     elif right_value is None:
@@ -38,7 +38,7 @@ class TestMergeSortJoin(unittest.TestCase):
             run(
                 QueryBuilder(
                     [
-                        SortMergeJoin(comperator),
+                        SortMergeJoin(comperator, "sequence1.number", "sequence2.number"),
                         MemoryScan(schema=schema1, table=sequence1_table),
                         MemoryScan(schema=schema2, table=sequence2_table),
                     ],
