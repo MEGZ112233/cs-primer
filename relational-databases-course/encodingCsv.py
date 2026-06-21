@@ -1,4 +1,5 @@
 import csv
+import struct
 from models import Schema
 import string
 from typing import Callable
@@ -13,6 +14,10 @@ class Encoder :
         encoded_value = number.to_bytes(4)
         return encoded_value 
 
+    def encode_float(number):
+        number = float(number)
+        encoded_value = struct.pack('f', number)
+        return encoded_value
 
     def encode_text(text) :
         text = str(text)
@@ -48,6 +53,10 @@ def decode_row(row_data , schema) :
            text = row_data[start_index:start_index+len_of_text]
            start_index+=len_of_text
            row.append(text)
+        elif datatype == 'float' : 
+            value = struct.unpack('f', row_data[start_index:start_index+4])[0]
+            start_index+=4
+            row.append(value)
     return row 
 
 def encode_row(row , schema:Schema): 

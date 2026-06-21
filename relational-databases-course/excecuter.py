@@ -3,8 +3,8 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-
-import encodingCsv
+import struct
+import encodingCsv  
 from encodingCsv import PAGE_SIZE
 from models import Schema, SortMergeActions
 from utils import format_row
@@ -36,6 +36,8 @@ class CSVScan(object):
             return int(value)
         elif type_str == "text":
             return str(value)
+        elif type_str == "float":
+            return float(value)
         else:
             raise ValueError(f"type : {type_str} is not supported in our DB")
 
@@ -107,6 +109,9 @@ class HeapScan(object):
                     "utf-8"
                 )
                 start_index += len_of_text
+            elif datatype == "float":
+                value = struct.unpack('f', row_data[start_index:start_index+4])[0]
+                start_index += 4
 
             column_index = f"{self.schema.table_name}.{column_name}"
             row[column_index] = value
@@ -320,7 +325,7 @@ class Sort(object):
 
     def next(self):
         if not self.sorted:
-            self.compute
+            self.compute()
         if self.arr is None or self.idx >= len(self.arr):
             return None
         x = self.arr[self.idx]
@@ -555,6 +560,49 @@ class SortMergeJoin(object):
         self.last_left_result = []
         self.left_row = None
         self.right_row = None
+
+class Aggregator(object):
+    def __init__(self, key_func, agg_func):
+        self.key_func = key_func
+        self.agg_func = agg_func
+        self.current_group = []
+        self.last_key = None
+        self.is_finished = False
+    
+    def next(self):
+        while True:
+            if self.is_finished:
+                return None
+            row = self.childs[0].next()
+            if self.is_end_of_group(row):
+                result = self.agg_func(self.current_group)
+                if row is not None:
+                    self.current_group = []
+                    self.last_key = self.key_func(row)
+                    self.current_group.append(row)
+                else : 
+                    self.is_finished = True
+                return result
+            else:
+                self.current_group.append(row)
+                self.last_key = self.key_func(row)
+
+
+    
+    def reset(self):
+        self.current_group = []
+        self.last_key = None
+        self.childs[0].reset()
+        self.is_finished = False
+    
+    def is_end_of_group(self, new_row):        
+        if new_row is None:
+            return True
+        
+        if self.last_key is not None and self.last_key != self.key_func(new_row):
+            return True
+        
+        return False
 
 
 class HashJoin(object):

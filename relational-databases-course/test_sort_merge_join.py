@@ -3,24 +3,10 @@ from typing import Callable
 
 from excecuter import MemoryScan, QueryBuilder, SortMergeJoin, run
 from models import DataTypes, Schema, SortMergeActions
-
+from utils import comperator
 sequence1_table = [[1], [2], [2], [2], [3], [4], [5]]
 sequence2_table = [[2], [2], [3], [3], [4], [5], [6]]
 
-
-def comperator(left_key, right_key, left_row, right_row):
-    left_value = left_row[left_key] if left_row else None
-    right_value = right_row[right_key] if right_row else None
-    if left_value is None:
-        return SortMergeActions.GET_LEFT_NO_MATCH
-    elif right_value is None:
-        return SortMergeActions.GET_RIGHT_NO_MATCH
-    elif left_value > right_value:
-        return SortMergeActions.GET_RIGHT_NO_MATCH
-    elif left_value < right_value:
-        return SortMergeActions.GET_LEFT_NO_MATCH
-    elif left_value == right_value:
-        return SortMergeActions.GET_RIGHT_MATCH
 
 
 class TestMergeSortJoin(unittest.TestCase):

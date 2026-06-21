@@ -1,22 +1,19 @@
-from excecuter import * 
+from models import Schema, SortMergeActions
+import os
 
-def seed_csv_into_heap(csv_file_path, schema:Schema, outpute_file_name): 
-    if outpute_file_name is None : 
-       outpute_file_name  = f"{schema.table_name}.bin"
-    result_of_insert =list(run(
-        QueryBuilder(
-            [
-                Insert(outpute_file_name, schema),
-                CSVScan(csv_file_path,schema)
-            ], 
-            [
-            -1,
-            0 
-            ]
-        )
-    )
-    )
-    print(f"result of insert is {len(result_of_insert)}")
+def comperator(left_key, right_key, left_row, right_row):
+    left_value = left_row[left_key] if left_row else None
+    right_value = right_row[right_key] if right_row else None
+    if left_value is None:
+        return SortMergeActions.GET_LEFT_NO_MATCH
+    elif right_value is None:
+        return SortMergeActions.GET_RIGHT_NO_MATCH
+    elif left_value > right_value:
+        return SortMergeActions.GET_RIGHT_NO_MATCH
+    elif left_value < right_value:
+        return SortMergeActions.GET_LEFT_NO_MATCH
+    elif left_value == right_value:
+        return SortMergeActions.GET_RIGHT_MATCH
     
 
 
